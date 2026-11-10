@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#17212b"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="styles.css">
+<title>Мій автосервіс</title>
+</head>
+<body>
+<header><h1>Мій автосервіс</h1><p>Облік автомобілів та замовлень</p></header>
+<nav><button data-tab="dashboard" class="active">Огляд</button><button data-tab="cars">Автомобілі</button><button data-tab="orders">Замовлення</button></nav>
+<main>
+<section id="dashboard" class="tab active"><div class="stats" id="stats"></div><h2>Останні замовлення</h2><div id="recent"></div></section>
+<section id="cars" class="tab"><div class="section-head"><h2>Автомобілі</h2><button id="addCar">＋ Додати авто</button></div><div id="carList"></div></section>
+<section id="orders" class="tab"><div class="section-head"><h2>Замовлення</h2><button id="addOrder">＋ Нове замовлення</button></div><div class="filters"><select id="orderFilter"><option value="all">Усі</option><option value="debt">З боргом</option><option value="paid">Оплачені</option></select></div><div id="orderList"></div></section>
+<section id="backup" class="tab"><h2>Резервна копія</h2><button id="export">Зберегти копію</button><label class="file">Відновити з копії<input id="import" type="file" accept="application/json"></label><p class="hint">Регулярно зберігайте резервну копію надійно. Дані зберігаються на цьому пристрої.</p></section>
+</main>
+<footer><button data-tab="backup">Резервна копія</button></footer>
+<dialog id="modal"><form method="dialog" id="editor"><h2 id="modalTitle"></h2><div id="modalBody"></div><div class="actions"><button value="cancel" class="secondary">Скасувати</button><button id="save" value="default">Зберегти</button></div></form></dialog>
+<div id="toast"></div><script src="app.js"></script>
+</body></html>
