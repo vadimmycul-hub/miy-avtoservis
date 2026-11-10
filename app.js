@@ -1,13 +1,14 @@
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],uid=()=>crypto.randomUUID(),v=id=>$('#'+id)?.value.trim()||'';
 let db=JSON.parse(localStorage.getItem('garageDB')||'{"cars":[],"orders":[]}');if(!Array.isArray(db.cash))db.cash=[];
+let pendingPdfFile=null, pendingPdfUrl=null;
 db.orders.forEach(o=>{if(!o.labor&&!o.parts){o.labor=(o.lines||[]).map(x=>({name:x.name,price:+x.price||0}));o.parts=[];delete o.lines}o.labor=o.labor||[];o.parts=o.parts||[];o.done=!!o.done});
 const persist=()=>localStorage.setItem('garageDB',JSON.stringify(db)),money=n=>(+n||0).toLocaleString('uk-UA',{maximumFractionDigits:2})+' ₴',esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',2200)}
 function tab(id){$$('.tab').forEach(x=>x.classList.toggle('active',x.id===id));$$('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));render()}$$('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 const sum=a=>(a||[]).reduce((s,x)=>s+(+x.price||0),0),labor=o=>sum(o.labor),parts=o=>sum(o.parts),total=o=>labor(o)+parts(o);
 const carName=id=>{let c=db.cars.find(x=>x.id===id);return c?`${c.make} ${c.model} · ${c.plate||'без номера'}`:'Авто видалено'},balance=()=>db.cash.reduce((s,t)=>s+(t.type==='in'?+t.amount:-+t.amount),0);
-function orderHTML(o){return `<article class="item order-item"><div class="order-top"><b>${esc(carName(o.carId))}</b>${o.done?'<img class="done-emoji" src="done-emoji.png" alt="Виконано" title="Замовлення виконано">':''}</div><p class="muted">${esc(o.date)} · ${esc(o.mileage||'')} км · ${o.done?'Виконано':'У роботі'}</p><p>Робота: <b>${money(labor(o))}</b> · Запчастини: <b>${money(parts(o))}</b></p><p>Разом: ${money(total(o))} · Оплачено: ${money(o.paid)} · Борг: <b>${money(total(o)-(+o.paid||0))}</b></p><button onclick="editOrder('${o.id}')">Відкрити / змінити</button><button class="secondary" onclick="printOrder('${o.id}')">Створити PDF</button><button class="secondary" onclick="deleteOrder('${o.id}')">Видалити</button></article>`}
-async function printOrder(id){
+function orderHTML(o){return `<article class="item order-item"><div class="order-top"><b>${esc(carName(o.carId))}</b>${o.done?'<img class="done-emoji" src="done-emoji.png" alt="Виконано" title="Замовлення виконано">':''}</div><p class="muted">${esc(o.date)} · ${esc(o.mileage||'')} км · ${o.done?'Виконано':'У роботі'}</p><p>Робота: <b>${money(labor(o))}</b> · Запчастини: <b>${money(parts(o))}</b></p><p>Разом: ${money(total(o))} · Оплачено: ${money(o.paid)} · Борг: <b>${money(total(o)-(+o.paid||0))}</b></p><button onclick="viewOrder('${o.id}')">Переглянути наряд</button><button class="secondary" onclick="editOrder('${o.id}')">Змінити</button><button class="secondary" onclick="deleteOrder('${o.id}')">Видалити</button></article>`}
+async function buildOrderPdf(id){
  const o=db.orders.find(x=>x.id===id);if(!o)return;
  const c=db.cars.find(x=>x.id===o.carId)||{};
  try{
@@ -30,17 +31,42 @@ async function printOrder(id){
   y=Math.min(y+90,H-95);ctx.strokeStyle='#66717d';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(margin,y);ctx.lineTo(margin+430,y);ctx.moveTo(W-margin-430,y);ctx.lineTo(W-margin,y);ctx.stroke();ctx.font='18px Arial';ctx.fillStyle='#66717d';ctx.fillText('Підпис клієнта',margin,y+12);ctx.fillText('Підпис виконавця',W-margin-430,y+12);
   const enc=new TextEncoder(),chunks=[],offsets=[0];let totalLen=0;
   const push=(b)=>{chunks.push(b);totalLen+=b.length;};
+  push(enc.encode('%PDF-1.4\n%1234\n'));
   const obj=(n,body)=>{offsets[n]=totalLen;push(enc.encode(`${n} 0 obj\n${body}\nendobj\n`));};
   const binaryObj=(n,head,data,tail)=>{offsets[n]=totalLen;push(enc.encode(`${n} 0 obj\n${head}\nstream\n`));push(data);push(enc.encode(`\nendstream\nendobj\n`));};
   const count=pages.length, pageNums=Array.from({length:count},(_,i)=>3+i*3), imageNums=pageNums.map(n=>n+1), contentNums=pageNums.map(n=>n+2);
   obj(1,'<< /Type /Catalog /Pages 2 0 R >>');obj(2,`<< /Type /Pages /Kids [${pageNums.map(n=>n+' 0 R').join(' ')}] /Count ${count} >>`);
   for(let i=0;i<count;i++){const jpg=await new Promise((resolve,reject)=>pages[i].toBlob(b=>b?b.arrayBuffer().then(x=>resolve(new Uint8Array(x))):reject(Error('Не вдалося сформувати сторінку')),'image/jpeg',0.92));const pn=pageNums[i],im=imageNums[i],co=contentNums[i];obj(pn,`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im${i} ${im} 0 R >> >> /Contents ${co} 0 R >>`);binaryObj(im,`<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>`,jpg,'');const stream=enc.encode(`q\n595 0 0 842 0 0 cm\n/Im${i} Do\nQ`);binaryObj(co,`<< /Length ${stream.length} >>`,stream,'');}
   const xref=totalLen;push(enc.encode(`xref\n0 ${offsets.length}\n0000000000 65535 f \n`));for(let i=1;i<offsets.length;i++)push(enc.encode(String(offsets[i]).padStart(10,'0')+' 00000 n \n'));push(enc.encode(`trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`));
-  const pdf=new Blob([new Uint8Array(chunks.reduce((a,b)=>a+b.length,0))],{type:'application/pdf'}); // replaced below with exact concatenation
-  const bytes=new Uint8Array(totalLen);let pos=0;for(const part of chunks){bytes.set(part,pos);pos+=part.length;}const file=new File([bytes],`Zamovlennia-${o.date||'order'}.pdf`,{type:'application/pdf'});
-  if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Наряд-замовлення'});toast('PDF готовий до поширення');}
-  else{const url=URL.createObjectURL(file);const a=document.createElement('a');a.href=url;a.download=file.name;a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);toast('PDF створено та завантажується');}
+  const bytes=new Uint8Array(totalLen);let pos=0;for(const part of chunks){bytes.set(part,pos);pos+=part.length;}
+  const plate=String(c.plate||'').replace(/[^a-zA-Z0-9_-]/g,'');
+  pendingPdfFile=new File([bytes],`Narjad-${plate||'auto'}-${o.date||'order'}.pdf`,{type:'application/pdf'});
+  if(pendingPdfUrl)URL.revokeObjectURL(pendingPdfUrl);
+  pendingPdfUrl=URL.createObjectURL(pendingPdfFile);
+  const actions=$('#pdfActions');
+  if(actions)actions.innerHTML=`<p class="success-note">PDF сформовано. Обери дію:</p><button type="button" onclick="shareOrderPdf()">Поділитися PDF</button><button type="button" class="secondary" onclick="downloadOrderPdf()">Завантажити PDF</button><button type="button" class="secondary" onclick="previewOrderPdf()">Переглянути PDF</button>`;
+  toast('PDF сформовано');
  }catch(e){console.error(e);toast('Не вдалося створити PDF. Спробуй ще раз.');}
+}
+function shareOrderPdf(){
+ if(!pendingPdfFile){toast('Спочатку сформуй PDF');return;}
+ if(navigator.share&&navigator.canShare&&navigator.canShare({files:[pendingPdfFile]})){
+  navigator.share({files:[pendingPdfFile]}).then(()=>toast('PDF передано в меню поширення')).catch(e=>{if(e.name!=='AbortError'){console.error(e);toast('Не вдалося поширити PDF');}});
+ }else downloadOrderPdf();
+}
+function downloadOrderPdf(){
+ if(!pendingPdfFile){toast('Спочатку сформуй PDF');return;}
+ const a=document.createElement('a');a.href=pendingPdfUrl||URL.createObjectURL(pendingPdfFile);a.download=pendingPdfFile.name;a.style.display='none';document.body.appendChild(a);a.click();a.remove();toast('Завантаження PDF');
+}
+function previewOrderPdf(){
+ if(!pendingPdfUrl){toast('Спочатку сформуй PDF');return;}
+ const a=document.createElement('a');a.href=pendingPdfUrl;a.target='_blank';a.rel='noopener';a.click();
+}
+function viewOrder(id){
+ const o=db.orders.find(x=>x.id===id);if(!o)return;const c=db.cars.find(x=>x.id===o.carId)||{};
+ const rows=(items)=>items.length?`<div class="view-table">${items.map((x,i)=>`<div class="view-row"><span>${i+1}. ${esc(x.name)}</span><b>${money(x.price)}</b></div>`).join('')}</div>`:'<p class="muted">Не додано</p>';
+ $('#modalTitle').textContent='Наряд-замовлення';$('#modalBody').innerHTML=`<div class="order-view"><div class="view-head"><b>${esc(carName(o.carId))}</b><span>${esc(o.date)} · ${o.done?'Виконано':'У роботі'}</span></div><h3>Автомобіль та клієнт</h3><p><b>Автомобіль:</b> ${esc([c.make,c.model].filter(Boolean).join(' ')||'—')}</p><p><b>Держ. номер:</b> ${esc(c.plate||'—')}</p><p><b>VIN:</b> ${esc(c.vin||'—')}</p><p><b>Пробіг:</b> ${esc(o.mileage||'—')} км</p><p><b>Власник:</b> ${esc(c.owner||'—')}</p><p><b>Телефон:</b> ${esc(c.phone||'—')}</p><h3>Роботи</h3>${rows(o.labor||[])}<h3>Запчастини</h3>${rows(o.parts||[])}<h3>Підсумок</h3><div class="view-row"><span>Роботи</span><b>${money(labor(o))}</b></div><div class="view-row"><span>Запчастини</span><b>${money(parts(o))}</b></div><div class="view-row total-row"><span>Разом</span><b>${money(total(o))}</b></div><div class="view-row"><span>Оплачено</span><b>${money(o.paid)}</b></div><div class="view-row"><span>Борг</span><b>${money(Math.max(0,total(o)-(+o.paid||0)))}</b></div>${o.note?`<h3>Примітка</h3><p>${esc(o.note)}</p>`:''}<div id="pdfActions" class="pdf-actions"><button type="button" onclick="buildOrderPdf('${o.id}')">Сформувати PDF</button></div><div class="view-buttons"><button type="button" class="secondary" onclick="document.getElementById('modal').close();editOrder('${o.id}')">Змінити наряд</button><button type="button" class="secondary" onclick="document.getElementById('modal').close()">Закрити</button></div></div>`;
+ $('#cancel').hidden=true;$('#save').hidden=true;$('#modal').showModal();
 }
 function render(){
 let debt=db.orders.filter(o=>total(o)>(+o.paid||0)).reduce((s,o)=>s+total(o)-(+o.paid||0),0);
@@ -51,7 +77,7 @@ let f=$('#orderFilter').value,orders=db.orders.filter(o=>f==='all'||(f==='debt'?
 $('#cashBalance').textContent=money(balance());let incoming=db.cash.filter(x=>x.type==='in').reduce((s,x)=>s+(+x.amount),0),out=db.cash.filter(x=>x.type==='out').reduce((s,x)=>s+(+x.amount),0);
 $('#cashStats').innerHTML=[['Надійшло',money(incoming)],['Витрачено / видано',money(out)]].map(x=>`<div class="stat"><span class="muted">${x[0]}</span><b>${x[1]}</b></div>`).join('');
 $('#cashList').innerHTML=db.cash.slice().reverse().map(t=>`<article class="item"><div class="head"><b>${esc(t.title)}</b><b class="${t.type==='in'?'positive':'negative'}">${t.type==='in'?'+':'−'} ${money(t.amount)}</b></div><p>${esc(t.date)} · ${esc(t.category)}</p><p class="muted">${esc(t.carId?carName(t.carId):'')}${t.worker?' · Працівник: '+esc(t.worker):''} ${esc(t.note||'')}</p><button class="secondary" onclick="deleteCash('${t.id}')">Видалити операцію</button></article>`).join('')||'<div class="empty">Операцій ще немає</div>'}
-function modal(title,html,save){$('#modalTitle').textContent=title;$('#modalBody').innerHTML=html;$('#modal').showModal();$('#editor').onsubmit=e=>{e.preventDefault();if(save()!==false){$('#modal').close();persist();render()}}}
+function modal(title,html,save){$('#cancel').hidden=false;$('#save').hidden=false;$('#modalTitle').textContent=title;$('#modalBody').innerHTML=html;$('#modal').showModal();$('#editor').onsubmit=e=>{e.preventDefault();if(save()!==false){$('#modal').close();persist();render()}}}
 function editCar(id){let c=db.cars.find(x=>x.id===id)||{};modal('Автомобіль',`<label>Марка<input id="make" required value="${esc(c.make||'')}"></label><label>Модель<input id="model" value="${esc(c.model||'')}"></label><label>Номер<input id="plate" value="${esc(c.plate||'')}"></label><label>VIN<input id="vin" value="${esc(c.vin||'')}"></label><label>Власник<input id="owner" value="${esc(c.owner||'')}"></label><label>Телефон<input id="phone" type="tel" inputmode="tel" value="${esc(c.phone||'')}"></label>`,()=>{let x={id:c.id||uid(),make:v('make'),model:v('model'),plate:v('plate'),vin:v('vin'),owner:v('owner'),phone:v('phone')};if(c.id)Object.assign(c,x);else db.cars.push(x)})}
 function lineRows(kind,items){return `<div id="${kind}Rows">${(items||[]).map((x,i)=>lineRow(kind,x,i)).join('')}</div><button type="button" class="secondary add-line" onclick="addLine('${kind}')">＋ Додати ${kind==='labor'?'роботу':'запчастину'}</button>`}
 function lineRow(kind,x={},i=0){return `<div class="line-row" data-kind="${kind}" data-purchase-cost="${x.purchaseCost||''}" data-purchase-cash-id="${x.purchaseCashId||''}"><label>Назва<input class="line-name" value="${esc(x.name||'')}" placeholder="${kind==='labor'?'Діагностика':'Передній важіль'}"></label><label>Сума для клієнта, грн<input class="line-price" type="number" inputmode="decimal" min="0" step=".01" value="${x.price?esc(x.price):''}" placeholder="${x.purchaseCost?'Куплено за '+money(x.purchaseCost):'Введіть ціну'}"></label>${x.purchaseCost?`<small class="muted">Закупівельна ціна: ${money(x.purchaseCost)}</small>`:''}<button type="button" class="secondary remove-line" onclick="this.parentElement.remove()">Прибрати</button></div>`}
